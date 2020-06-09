@@ -1,58 +1,52 @@
 'use strict';
 
 const EventEmitter = require('events');
-const util = require('util');
 
 const Assistant = require('./components/assistant');
 const Auth = require('./components/auth');
 const Conversation = require('./components/conversation');
 
-function GoogleAssistant(authConfig, callback) {
-  if (authConfig === undefined) {
-    const error = new Error('Missing auth config object!');
+function GoogleAssistant(authConfig) {
+  // EventEmitter inheritance
+  EventEmitter.call(this);
+
+  if (authConfig === null) {
+    this.emit('error', new Error('Missing auth config object'))
+  }
+
+  this.authConfig = authConfig;
+  this.assistant = null;
+}
+
+// EventEmitter inheritance
+GoogleAssistant.prototype = Object.create(EventEmitter.prototype);
+
+GoogleAssistant.prototype.assistantReady = function() {
+  this.assistant && this.emit('ready', this.assistant);
+}
+
+GoogleAssistant.prototype.setup = function() {
+  if (this.authConfig.oauth2Client) {
+    this.assistant = new Assistant(this.authConfig.oauth2Client);
+    this.assistantReady();
+  } else {
+    const auth = new Auth(this.authConfig);
+    auth.on('ready', client => {
+      this.assistant = new Assistant(client);
+      this.assistantReady();
+    }) 
+  }
+}
+
+GoogleAssistant.prototype.start = function(conversationConfig) {
+  if (this.assistant === null) {
+    const error = new Error('Tried calling start() before the ready event!');
     this.emit('error', error);
-    if (callback) callback(error);
     return;
   }
 
-  let assistant;
-
-  const assistantReady = () => {
-    if (assistant) {
-      this.emit('ready', assistant);
-      if (callback) callback(assistant);
-    }
-  };
-
-  if (authConfig.oauth2Client) {
-    // we are passing in a client that is already authed with Google
-    assistant = new Assistant(authConfig.oauth2Client);
-    assistantReady();
-  } else {
-    // we need to auth with Google right out of the gate
-    const auth = new Auth(authConfig);
-
-    auth.on('ready', (client) => {
-      assistant = new Assistant(client);
-      assistantReady();
-    });
-  }
-
-  this.start = (conversationConfig, callback) => {
-    if (assistant === undefined) {
-      const error = new Error('Tried calling start() before the ready event!');
-      this.emit('error', error);
-      if (callback) callback(error);
-      return;
-    }
-
-    const conversation = new Conversation(assistant, conversationConfig);
-    this.emit('started', conversation);
-    if (callback) callback(conversation);
-  };
-
-  return this;
+  const conversation = new Conversation(this.assistant, conversationConfig);
+  this.emit('started', conversation);
 }
 
-util.inherits(GoogleAssistant, EventEmitter);
 module.exports = GoogleAssistant;
